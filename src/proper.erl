@@ -1219,6 +1219,15 @@ get_rerun_result({error,_Reason} = ErrorResult) ->
     ErrorResult.
 
 -spec perform(pos_integer(), test(), opts()) -> imm_result().
+perform(NumTests, {exists, TMap, Prop, Not}, #opts{search_strategy = Strat, start_size = StartSize} = Opts) ->
+    proper_target:init_strategy(Strat),
+    Target = proper_target:targeted(make_ref(), TMap),
+    BackupSize = get('$size'),
+    put('$size', StartSize - 1),
+    Res = perform(0, NumTests, ?MAX_TRIES_FACTOR * NumTests, {exists, Target, Prop, Not}, none, none, Opts),
+    put('$size', BackupSize),
+    proper_target:cleanup_strategy(),
+    Res;
 perform(NumTests, Test, Opts) ->
     perform(0, NumTests, ?MAX_TRIES_FACTOR * NumTests, Test, none, none, Opts).
 
@@ -1232,6 +1241,39 @@ perform(Passed, _ToPass, 0, _Test, Samples, Printers, _Opts) ->
     end;
 perform(ToPass, ToPass, _TriesLeft, _Test, Samples, Printers, _Opts) ->
     #pass{samples = Samples, printers = Printers, performed = ToPass, actions = []};
+perform(Passed, ToPass, TriesLeft, {exists, _, _, Not} = Test, Samples, Printers,
+	#opts{output_fun = Print} = Opts) ->
+    case run(Test, Opts) of
+    #pass{reason=true_prop, samples = MoreSamples, printers = MorePrinters} ->
+        Print(".", []),
+	    NewSamples = add_samples(MoreSamples, Samples),
+	    NewPrinters = case Printers of
+			      none -> MorePrinters;
+			      _    -> Printers
+			  end,
+        grow_size(Opts),
+        perform(Passed + 1, ToPass, TriesLeft - 1, Test, NewSamples, NewPrinters, Opts);
+        %% the search is finished
+    % #fail{reason=false_prop, actions = Actions} ->
+    %     Print("!", []),
+    %     case Not of
+    %     true ->
+    %         create_fail_result(#ctx{actions = Actions}, false_prop);
+    %     false ->
+    %         create_pass_result(#ctx{}, true_prop)
+    %     end;
+    #fail{} = FailResult -> %% TODO check that fails in the EXIST macros trigger a bug
+        Print("!", []),
+        FailResult#fail{performed = Passed + 1};
+    {error, rejected} ->
+        Print("x", []),
+        grow_size(Opts),
+        perform(Passed, ToPass, TriesLeft - 1, Test, Samples, Printers, Opts);
+    {error, _} = Error ->
+        Error;
+    Other ->
+        {error, {unexpected, Other}}
+    end;
 perform(Passed, ToPass, TriesLeft, Test, Samples, Printers,
 	#opts{output_fun = Print} = Opts) ->
     case run(Test, Opts) of
@@ -1358,19 +1400,15 @@ run(Result, #ctx{mode = Mode, bound = Bound} = Ctx, _Opts) when is_boolean(Resul
 	false ->
 	    {error, too_many_instances}
     end;
-run({exists, TMap, Prop, Not}, #ctx{mode = new} = Ctx,
-    #opts{search_strategy = Strat, search_steps = Steps,
-          output_fun = Print, start_size = StartSize} = Opts) ->
-    proper_target:init_strategy(Strat),
-    Target = proper_target:targeted(make_ref(), TMap),
-    Print("[", []),
-    BackupSize = get('$size'),
-    put('$size', StartSize - 1),
-    SR = perform_search(Steps, Target, Prop, Ctx, Opts, Not),
-    put('$size', BackupSize),
-    Print("]", []),
-    proper_target:cleanup_strategy(),
-    SR;
+run({exists, RawType, Prop, _Not}, #ctx{mode = new, bound = Bound} = Ctx, Opts) ->
+    case proper_gen:safe_generate(RawType) of
+	{ok, ImmInstance} ->
+	    Instance = proper_gen:clean_instance(ImmInstance),
+	    NewCtx = Ctx#ctx{bound = [ImmInstance | Bound]},
+	    force(Instance, Prop, NewCtx, Opts);
+	{error,_Reason} = Error ->
+	    Error
+    end;
 run({exists, TMap, Prop, Not}, #ctx{mode = try_shrunk, bound = []}, Opts) ->
     run({exists, TMap, Prop, Not}, #ctx{mode = new, bound = []}, Opts#opts{output_fun = fun (_, _) -> ok end});
 run({exists, _TMap, _Prop, _Not}, #ctx{bound = []} = Ctx, _Opts) ->
