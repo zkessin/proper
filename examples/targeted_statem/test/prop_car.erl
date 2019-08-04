@@ -27,12 +27,12 @@
 % accelerate(Speed) when Speed > 20 ->
 %     integer(10, round(Speed * 0.1));
 accelerate(Speed) ->
-    integer(0, trunc(200 - Speed)).
+    integer(0, 200 - Speed).
 
 % brake(Speed) when Speed > 20 ->
 %     integer(10, round(Speed * 0.1));
 brake(Speed) ->
-    integer(0, round(Speed)).
+    integer(0, Speed).
 
 refuel(Fuel) ->
     integer(0, round(?MAX_FUEL - Fuel)).
@@ -79,11 +79,11 @@ list_commands(S) ->
 num_commands() -> 4.
 
 precondition(#state{fuel = Fuel, speed = Speed}, {call, _, accelerate, _}) ->
-    Fuel > ?MAX_FUEL * 0.1 andalso Speed < 200;
+    Fuel > ?MAX_FUEL * 0.1 andalso Speed < 190;
 precondition(#state{speed = Speed}, {call, _, brake, _}) ->
-    Speed > 0;
+    Speed > 1;
 precondition(#state{speed = Speed}, {call, _, travel, _}) ->
-    Speed > 0;
+    Speed > 1;
 precondition(#state{fuel = Fuel}, {call, _, refuel, _}) ->
     Fuel < ?MAX_FUEL * 0.8;
 precondition(_, _) ->
@@ -179,7 +179,7 @@ prop_server_targeted() ->
                         ?SERVER:stop(),
                         #state{distance = Distance, burnt = Burnt} = State,
                         Consumption = 100 * Burnt / Distance,
-                        UV = case Consumption > 7 of
+                        UV = case Consumption > 10 of
                             true -> 0;
                             false -> Distance
                         end,
@@ -188,7 +188,7 @@ prop_server_targeted() ->
                             io:format("Distance: ~p~nConsumption: ~p~n", [Distance, Consumption]),
                             aggregate(
                                 command_names(Cmds),
-                                Result =:= ok andalso (Distance < 1000 orelse Consumption > 7)
+                                Result =:= ok andalso (Distance < 1000 orelse Consumption > 10)
                             )
                         );
                     false ->
